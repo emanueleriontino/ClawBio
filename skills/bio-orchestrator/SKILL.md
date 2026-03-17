@@ -147,6 +147,35 @@ Plan:
 - **Log everything**: Every command executed, every file read/written, every tool version.
 - **Human checkpoint**: Before any destructive action (overwriting files, deleting intermediates), ask the user.
 
+## Telegram File Upload Handling
+
+When a user uploads a file via Telegram (or any channel), **always use `system.run`** to execute the pipeline — never try to read or analyse the file contents directly with your LLM.
+
+### Automatic pipeline for `.txt` uploads (23andMe format)
+
+```bash
+# Step 1 — Orchestrate (detects skill, trims file)
+/home/parallels/GitHub_Reps/ClawBio/.venv/bin/python3 \
+  /home/parallels/GitHub_Reps/ClawBio/skills/bio-orchestrator/orchestrator.py \
+  --input <uploaded_file_path> \
+  --output /tmp/orch_out
+
+# Step 2 — Run the detected skill on the trimmed file
+/home/parallels/GitHub_Reps/ClawBio/.venv/bin/python3 \
+  /home/parallels/GitHub_Reps/ClawBio/skills/nutrigx_advisor/nutrigx_advisor.py \
+  --input /tmp/orch_out/<filename>_trimmed.txt \
+  --output /tmp/nutrigx_out
+
+# Step 3 — Read and send back the report
+cat /tmp/nutrigx_out/nutrigx_report.md
+```
+
+**Important:**
+- Always use the venv Python: `/home/parallels/GitHub_Reps/ClawBio/.venv/bin/python3`
+- The trimmed file path is returned in the orchestrator's JSON output under `trimmed_input`
+- Uploaded files land in `/home/parallels/.openclaw/media/inbound/`
+- Send the full report content back to the user in the chat
+
 ## Example Queries
 
 - "What kind of file is this? [path]"

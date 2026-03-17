@@ -25,8 +25,33 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from clawbio.common.checksums import sha256_file as _shared_sha256
-from clawbio.common.report import write_result_json
+import importlib.util as _ilu
+import types as _types
+
+# Load clawbio.common.checksums and clawbio.common.report directly from their
+# source files, bypassing clawbio/common/__init__.py.  The __init__.py eagerly
+# imports scrna_io → numpy/scanpy which may not be installed in lightweight
+# environments (e.g. OpenClaw gateway running without the scRNA conda env).
+# Injecting stub package entries into sys.modules prevents Python from
+# executing __init__.py when the submodules are imported.
+for _pkg in ("clawbio", "clawbio.common"):
+    if _pkg not in sys.modules:
+        sys.modules[_pkg] = _types.ModuleType(_pkg)
+
+def _load_module_file(name: str, file_path: Path):
+    spec = _ilu.spec_from_file_location(name, file_path)
+    if spec is None:
+        raise ImportError(f"Cannot locate module file: {file_path}")
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[name] = mod  # register before exec to satisfy intra-package imports
+    spec.loader.exec_module(mod)
+    return mod
+
+_checksums = _load_module_file("clawbio.common.checksums", _PROJECT_ROOT / "clawbio" / "common" / "checksums.py")
+_shared_sha256 = _checksums.sha256_file
+
+_report = _load_module_file("clawbio.common.report", _PROJECT_ROOT / "clawbio" / "common" / "report.py")
+write_result_json = _report.write_result_json
 
 # ---------------------------------------------------------------------------
 # File-type routing
@@ -203,6 +228,35 @@ def _looks_like_illumina_bundle(filepath: Path) -> bool:
     return has_sample_sheet and has_vcf
 
 
+def is_23andme_file(filepath: Path) -> bool:
+    """Return True if the file looks like a 23andMe raw data export.
+
+    Handles two variants:
+    - Files with an explicit column header line containing rsid/chromosome/genotype
+    - Files that go straight from '#' comments to tab-separated data rows
+      (rsXXX \\t chromosome \\t position \\t genotype)
+    """
+    import re
+    _data_pattern = re.compile(r'^rs\d+\t\S+\t\d+\t[ACGTacgt\-]+\s*$')
+    try:
+        with open(filepath, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("#"):
+                    if "rsid" in line.lower() and "chromosome" in line.lower() and "genotype" in line.lower():
+                        return True
+                    continue
+                # First non-comment line: explicit column header or data row
+                lower = line.lower()
+                if "rsid" in lower and "chromosome" in lower and "genotype" in lower:
+                    return True
+                if _data_pattern.match(line):
+                    return True
+                break
+    except Exception:
+        pass
+    return False
+
+
 def detect_skill_from_file(filepath: Path) -> str | None:
     """Determine which skill handles a given file based on extension."""
     if filepath.is_dir():
@@ -216,6 +270,9 @@ def detect_skill_from_file(filepath: Path) -> str | None:
         inferred = detect_skill_from_tabular_header(filepath)
         if inferred:
             return inferred
+    # .txt files: check for 23andMe header (rsid / chromosome / genotype columns)
+    if filepath.suffix.lower() == ".txt" and is_23andme_file(filepath):
+        return "nutrigx_advisor"
     if suffixes in EXTENSION_MAP:
         return EXTENSION_MAP[suffixes]
     suffix = filepath.suffix.lower()
@@ -300,6 +357,53 @@ def detect_skill_with_hint_from_query(query: str) -> tuple[str | None, str]:
         if keyword in query_lower:
             return skill, ""
     return None, ""
+
+
+def trim_23andme_for_skill(input_path: Path, skill_name: str, output_dir: Path) -> Path | None:
+    """Trim a 23andMe-style file to only the rsIDs required by a skill's snp_panel.json.
+
+    Preserves all leading '#' header lines so format-detection in parse_input.py
+    continues to work.  Returns the path to the trimmed file, or None if the skill
+    has no snp_panel.json (no trimming needed / not applicable).
+    """
+    panel_path = SKILLS_DIR / skill_name / "data" / "snp_panel.json"
+    if not panel_path.exists():
+        return None
+
+    try:
+        with open(panel_path) as f:
+            panel = json.load(f)
+        rsids: set[str] = {snp["rsid"] for snp in panel}
+    except Exception as e:
+        print(f"[trim] WARNING: could not load SNP panel for '{skill_name}': {e}")
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    trimmed_path = output_dir / f"{input_path.stem}_trimmed{input_path.suffix}"
+
+    header_lines: list[str] = []
+    matched_lines: list[str] = []
+
+    with open(input_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("#"):
+                header_lines.append(line)
+            else:
+                rsid = line.split("\t", 1)[0]
+                if rsid in rsids:
+                    matched_lines.append(line)
+
+    with open(trimmed_path, "w", encoding="utf-8") as f:
+        f.writelines(header_lines)
+        f.writelines(matched_lines)
+
+    original_mb = input_path.stat().st_size / 1_000_000
+    trimmed_kb = trimmed_path.stat().st_size / 1_000
+    print(
+        f"[trim] {input_path.name}: {original_mb:.1f} MB → {trimmed_kb:.1f} KB "
+        f"({len(matched_lines)}/{len(rsids)} panel rsIDs matched)"
+    )
+    return trimmed_path
 
 
 def detect_routing_hint_for_file(filepath: Path) -> str:
@@ -596,6 +700,19 @@ def main() -> None:
         print(f"Skill '{skill}' not found")
         sys.exit(1)
 
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Trim large 23andMe-style files to only the rsIDs the target skill needs.
+    # This prevents gateway freezes when uploading multi-MB raw genotype files
+    # (e.g. from Telegram) before the file is passed to the skill.
+    effective_input = args.input
+    trimmed_path: Path | None = None
+    if input_path and input_path.exists() and input_path.stat().st_size > 0:
+        trimmed_path = trim_23andme_for_skill(input_path, skill, output_dir)
+        if trimmed_path:
+            effective_input = str(trimmed_path)
+
     # Output routing decision
     result = {
         "input": args.input,
@@ -604,6 +721,8 @@ def main() -> None:
         "skill_dir": str(skill_dir),
         "available_skills": list_available_skills(),
     }
+    if trimmed_path:
+        result["trimmed_input"] = str(trimmed_path)
     if routing_hint:
         result["routing_hint"] = routing_hint
     if args.profile:
@@ -611,16 +730,17 @@ def main() -> None:
     print(json.dumps(result, indent=2))
 
     # Log the routing
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    append_audit_log(output_dir, f"Routed to {skill}", f"input={args.input}, method={method}")
+    append_audit_log(output_dir, f"Routed to {skill}", f"input={effective_input}, method={method}")
 
     # Write result.json
+    summary: dict = {"detected_skill": skill, "method": method}
+    if trimmed_path:
+        summary["trimmed_input"] = str(trimmed_path)
     write_result_json(
         output_dir=output_dir,
         skill="bio-orchestrator",
         version="0.2.0",
-        summary={"detected_skill": skill, "method": method},
+        summary=summary,
         data=result,
     )
 
