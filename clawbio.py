@@ -297,7 +297,7 @@ SKILLS = {
     "scrna": {
         "script": SKILLS_DIR / "scrna-orchestrator" / "scrna_orchestrator.py",
         "demo_args": ["--demo"],
-        "description": "scRNA Orchestrator (Scanpy QC, doublet detection, clustering, annotation, optional latent downstream mode, contrastive markers)",
+        "description": "scRNA Orchestrator (Scanpy QC, doublet detection, clustering, annotation, optional latent downstream mode, dataset-level + within-cluster contrastive markers)",
         "allowed_extra_flags": {
             "--min-genes",
             "--min-cells",
@@ -310,15 +310,9 @@ SKILLS = {
             "--random-state",
             "--top-markers",
             "--contrast-groupby",
-            "--contrast-group1",
-            "--contrast-group2",
+            "--contrast-scope",
+            "--contrast-clusterby",
             "--contrast-top-genes",
-            "--contrast-volcano",
-            "--de-groupby",
-            "--de-group1",
-            "--de-group2",
-            "--de-top-genes",
-            "--de-volcano",
             "--doublet-method",
             "--annotate",
             "--annotation-model",
@@ -328,11 +322,13 @@ SKILLS = {
     "scrna-embedding": {
         "script": SKILLS_DIR / "scrna-embedding" / "scrna_embedding.py",
         "demo_args": ["--demo"],
-        "description": "scRNA Embedding (scVI latent embedding, optional batch integration, stable integrated h5ad export)",
+        "description": "scRNA Embedding (scVI/scANVI latent embedding, optional batch integration, stable integrated h5ad export)",
         "allowed_extra_flags": {
             "--method",
             "--layer",
             "--batch-key",
+            "--labels-key",
+            "--unlabeled-category",
             "--min-genes",
             "--min-cells",
             "--max-mt-pct",
@@ -387,6 +383,29 @@ SKILLS = {
         "no_input_required": True,
         "accepts_genotypes": False,
     },
+    "bigquery": {
+        "script": SKILLS_DIR / "bigquery-public" / "bigquery_public.py",
+        "demo_args": ["--demo"],
+        "description": "BigQuery Public — read-only SQL bridge for public datasets with local outputs",
+        "allowed_extra_flags": {
+            "--query",
+            "--location",
+            "--max-rows",
+            "--max-bytes-billed",
+            "--param",
+            "--dry-run",
+            "--list-datasets",
+            "--list-tables",
+            "--describe",
+            "--preview",
+            "--count-only",
+            "--paper",
+            "--note",
+        },
+        "allowed_extra_flags_without_values": {"--dry-run", "--count-only"},
+        "no_input_required": True,
+        "accepts_genotypes": False,
+    },
     "profile": {
         "script": SKILLS_DIR / "profile-report" / "profile_report.py",
         "demo_args": ["--demo"],
@@ -400,6 +419,28 @@ SKILLS = {
         "demo_args": ["--demo"],
         "description": "Galaxy tool discovery and execution (8,000+ bioinformatics tools)",
         "allowed_extra_flags": {"--search", "--list-categories", "--tool-details", "--run", "--max-results"},
+        "no_input_required": True,
+        "accepts_genotypes": False,
+    },
+    "bioc": {
+        "script": SKILLS_DIR / "bioconductor-bridge" / "bioconductor_bridge.py",
+        "demo_args": ["--demo"],
+        "description": "Bioconductor package discovery, workflow recommendation, setup, and starter code generation",
+        "allowed_extra_flags": {
+            "--search",
+            "--recommend",
+            "--workflow",
+            "--package-details",
+            "--docs-search",
+            "--package-docs",
+            "--list-domains",
+            "--setup",
+            "--install",
+            "--format",
+            "--modality",
+            "--container",
+            "--max-results",
+        },
         "no_input_required": True,
         "accepts_genotypes": False,
     },
@@ -439,6 +480,23 @@ SKILLS = {
             "--min-samples",
         },
     },
+    "methylation": {
+        "script": SKILLS_DIR / "methylation-clock" / "methylation_clock.py",
+        "demo_args": [
+            "--input",
+            str(SKILLS_DIR / "methylation-clock" / "data" / "GSE139307_small.csv.gz"),
+        ],
+        "description": "Epigenetic age from methylation clocks (PyAging)",
+        "no_input_required": True,
+        "allowed_extra_flags": {
+            "--geo-id",
+            "--clocks",
+            "--metadata-cols",
+            "--imputer-strategy",
+            "--skip-epicv2-aggregation",
+            "--verbose",
+        },
+    },
     "diffviz": {
         "script": SKILLS_DIR / "diff-visualizer" / "diff_visualizer.py",
         "demo_args": ["--demo"],
@@ -454,6 +512,43 @@ SKILLS = {
             "--lfc-threshold",
             "--min-basemean",
         },
+        "accepts_genotypes": False,
+    },
+    "protocols-io": {
+        "script": SKILLS_DIR / "protocols-io" / "protocols_io.py",
+        "demo_args": ["--demo"],
+        "description": "protocols.io bridge — search, browse, and retrieve scientific protocols via REST API",
+        "allowed_extra_flags": {
+            "--login",
+            "--search",
+            "--protocol",
+            "--steps",
+            "--dump",
+            "--page-size",
+            "--page",
+            "--filter",
+        },
+        "no_input_required": True,
+        "accepts_genotypes": False,
+    },
+    "acmg": {
+        "script": SKILLS_DIR / "clinical-variant-reporter" / "clinical_variant_reporter.py",
+        "demo_args": ["--demo"],
+        "description": "ACMG/AMP clinical variant classifier (28-criteria, SF v3.2 screening)",
+        "allowed_extra_flags": {"--genes", "--assembly"},
+        "accepts_genotypes": False,
+    },
+    "llm-bench": {
+        "script": SKILLS_DIR / "llm-biobank-bench" / "llm_biobank_bench.py",
+        "demo_args": ["--demo"],
+        "description": "Benchmark LLMs on UK Biobank knowledge retrieval (4 tasks, 6 models)",
+        "allowed_extra_flags": {
+            "--task",
+            "--models",
+            "--schema19",
+            "--schema27",
+        },
+        "no_input_required": True,
         "accepts_genotypes": False,
     },
 }
@@ -626,6 +721,7 @@ def run_skill(
     # SEC INT-001: filter extra_args against per-skill allowlist
     if extra_args:
         allowed = skill_info.get("allowed_extra_flags", set())
+        flags_without_values = skill_info.get("allowed_extra_flags_without_values", set())
         blocked = {"--input", "--output", "--demo"}
         filtered = []
         i = 0
@@ -636,7 +732,13 @@ def run_skill(
                 continue
             if flag in allowed:
                 filtered.append(extra_args[i])
-                if "=" not in extra_args[i] and i + 1 < len(extra_args) and not extra_args[i + 1].startswith("-"):
+                if (
+                    "=" not in extra_args[i]
+                    and flag not in flags_without_values
+                    and i + 1 < len(extra_args)
+                    and extra_args[i + 1].split("=")[0] not in allowed
+                    and extra_args[i + 1].split("=")[0] not in blocked
+                ):
                     filtered.append(extra_args[i + 1])
                     i += 1
             i += 1
@@ -863,6 +965,35 @@ def main():
     run_parser.add_argument("--genes", default=None, help="Comma-separated gene symbols for ClinPGx")
     run_parser.add_argument("--rsid", default=None, help="rsID for GWAS lookup skill (e.g. rs3798220)")
     run_parser.add_argument("--skip", default=None, help="Comma-separated API names to skip (gwas-lookup skill)")
+    run_parser.add_argument("--query", default=None, help="Inline SQL query for bigquery skill")
+    run_parser.add_argument("--location", default=None, help="BigQuery location (e.g. US, EU)")
+    run_parser.add_argument("--max-rows", type=int, default=None, help="Maximum number of query rows for bigquery skill")
+    run_parser.add_argument(
+        "--max-bytes-billed",
+        type=int,
+        default=None,
+        help="Maximum billed bytes safeguard for bigquery skill",
+    )
+    run_parser.add_argument(
+        "--param",
+        action="append",
+        default=None,
+        help="Repeatable bigquery parameter in name=type:value format",
+    )
+    run_parser.add_argument("--dry-run", action="store_true", help="BigQuery dry-run (estimate bytes only)")
+    run_parser.add_argument("--list-datasets", default=None, help="List BigQuery datasets for a project")
+    run_parser.add_argument("--list-tables", default=None, help="List BigQuery tables for a dataset (project.dataset)")
+    run_parser.add_argument("--describe", default=None, help="Describe a BigQuery table schema (project.dataset.table)")
+    run_parser.add_argument("--preview", type=int, default=None, help="Preview wrapper row limit for bigquery skill")
+    run_parser.add_argument("--count-only", action="store_true", help="Return only row count for bigquery skill")
+    run_parser.add_argument("--paper", default=None, help="Paper reference/DOI/URL/path for bigquery provenance")
+    run_parser.add_argument("--note", action="append", default=None, help="Repeatable provenance note for bigquery skill")
+    run_parser.add_argument("--geo-id", default=None, help="GEO accession for methylation clock skill")
+    run_parser.add_argument("--clocks", default=None, help="Comma-separated clock names for methylation skill")
+    run_parser.add_argument("--metadata-cols", default=None, help="Comma-separated metadata columns for methylation skill")
+    run_parser.add_argument("--imputer-strategy", default=None, help="Imputer strategy for methylation skill")
+    run_parser.add_argument("--skip-epicv2-aggregation", action="store_true", help="Skip EPICv2 probe aggregation")
+    run_parser.add_argument("--verbose", action="store_true", help="Verbose output for skill backends")
     run_parser.add_argument("--vcf", default=None, help="Explicit VCF override for illumina skill")
     run_parser.add_argument("--qc", default=None, help="Explicit QC metrics override for illumina skill")
     run_parser.add_argument("--sample-sheet", default=None, help="Explicit SampleSheet override for illumina skill")
@@ -905,6 +1036,12 @@ def main():
     run_parser.add_argument("--method", default=None, help="Embedding backend (scrna-embedding skill)")
     run_parser.add_argument("--layer", default=None, help="Raw-count layer for `.h5ad` input (scrna-embedding skill)")
     run_parser.add_argument("--batch-key", default=None, help="obs batch column for integration (scrna-embedding skill)")
+    run_parser.add_argument("--labels-key", default=None, help="obs label column for scANVI (scrna-embedding skill)")
+    run_parser.add_argument(
+        "--unlabeled-category",
+        default=None,
+        help="Category value representing unlabeled cells for scANVI (scrna-embedding skill)",
+    )
     run_parser.add_argument("--min-genes", type=int, default=None, help="Minimum genes per cell (scrna/scrna-embedding skill)")
     run_parser.add_argument("--min-cells", type=int, default=None, help="Minimum cells per gene (scrna/scrna-embedding skill)")
     run_parser.add_argument(
@@ -957,39 +1094,20 @@ def main():
         help="obs column for contrastive marker analysis (scrna skill)",
     )
     run_parser.add_argument(
-        "--contrast-group1",
+        "--contrast-scope",
         default=None,
-        help="Group 1 value for contrastive marker analysis (scrna skill)",
+        help="Contrast scope: dataset, within-cluster, or both (scrna skill)",
     )
     run_parser.add_argument(
-        "--contrast-group2",
+        "--contrast-clusterby",
         default=None,
-        help="Group 2 reference value for contrastive marker analysis (scrna skill)",
+        help="Cluster/partition column for within-cluster contrasts (scrna skill)",
     )
-    run_parser.add_argument("--de-groupby", default=None, help="Deprecated alias for --contrast-groupby (scrna skill)")
-    run_parser.add_argument("--de-group1", default=None, help="Deprecated alias for --contrast-group1 (scrna skill)")
-    run_parser.add_argument("--de-group2", default=None, help="Deprecated alias for --contrast-group2 (scrna skill)")
     run_parser.add_argument(
         "--contrast-top-genes",
         type=int,
         default=None,
         help="Top contrastive marker genes in summary table (scrna skill)",
-    )
-    run_parser.add_argument(
-        "--de-top-genes",
-        type=int,
-        default=None,
-        help="Deprecated alias for --contrast-top-genes (scrna skill)",
-    )
-    run_parser.add_argument(
-        "--contrast-volcano",
-        action="store_true",
-        help="Generate contrastive markers volcano plot (scrna skill)",
-    )
-    run_parser.add_argument(
-        "--de-volcano",
-        action="store_true",
-        help="Deprecated alias for --contrast-volcano (scrna skill)",
     )
     run_parser.add_argument(
         "--doublet-method",
@@ -1006,6 +1124,19 @@ def main():
         default=None,
         help="Local CellTypist model name or path for scrna skill",
     )
+    run_parser.add_argument("--search", default=None, help="Live Bioconductor package search query for bioc skill")
+    run_parser.add_argument("--recommend", default=None, help="Recommendation query for bioc skill")
+    run_parser.add_argument("--workflow", default=None, help="Workflow query for bioc skill")
+    run_parser.add_argument("--package-details", default=None, help="Bioconductor package name for bioc skill")
+    run_parser.add_argument("--docs-search", default=None, help="Documentation search query for bioc skill")
+    run_parser.add_argument("--package-docs", default=None, help="Fetch package documentation for bioc skill")
+    run_parser.add_argument("--list-domains", action="store_true", help="List supported Bioconductor domains")
+    run_parser.add_argument("--setup", action="store_true", help="Inspect local Bioconductor setup")
+    run_parser.add_argument("--install", default=None, help="Comma-separated Bioconductor packages to install")
+    run_parser.add_argument("--format", dest="skill_format", default=None, help="Input format hint for bioc skill")
+    run_parser.add_argument("--container", default=None, help="Canonical object/container hint for bioc skill")
+    run_parser.add_argument("--modality", default=None, help="Modality hint for bioc skill")
+    run_parser.add_argument("--max-results", type=int, default=None, help="Maximum bioc search/recommendation results")
 
     args = parser.parse_args()
 
@@ -1046,6 +1177,46 @@ def main():
             extra.extend(["--rsid", args.rsid])
         if getattr(args, "skip", None):
             extra.extend(["--skip", args.skip])
+        if getattr(args, "query", None):
+            extra.extend(["--query", args.query])
+        if getattr(args, "location", None):
+            extra.extend(["--location", args.location])
+        if getattr(args, "max_rows", None) is not None:
+            extra.extend(["--max-rows", str(args.max_rows)])
+        if getattr(args, "max_bytes_billed", None) is not None:
+            extra.extend(["--max-bytes-billed", str(args.max_bytes_billed)])
+        if getattr(args, "param", None):
+            for param in args.param:
+                extra.extend(["--param", param])
+        if getattr(args, "dry_run", False):
+            extra.append("--dry-run")
+        if getattr(args, "list_datasets", None):
+            extra.extend(["--list-datasets", args.list_datasets])
+        if getattr(args, "list_tables", None):
+            extra.extend(["--list-tables", args.list_tables])
+        if getattr(args, "describe", None):
+            extra.extend(["--describe", args.describe])
+        if getattr(args, "preview", None) is not None:
+            extra.extend(["--preview", str(args.preview)])
+        if getattr(args, "count_only", False):
+            extra.append("--count-only")
+        if getattr(args, "paper", None):
+            extra.extend(["--paper", args.paper])
+        if getattr(args, "note", None):
+            for note in args.note:
+                extra.extend(["--note", note])
+        if getattr(args, "geo_id", None):
+            extra.extend(["--geo-id", args.geo_id])
+        if getattr(args, "clocks", None):
+            extra.extend(["--clocks", args.clocks])
+        if getattr(args, "metadata_cols", None):
+            extra.extend(["--metadata-cols", args.metadata_cols])
+        if getattr(args, "imputer_strategy", None):
+            extra.extend(["--imputer-strategy", args.imputer_strategy])
+        if getattr(args, "skip_epicv2_aggregation", False):
+            extra.append("--skip-epicv2-aggregation")
+        if getattr(args, "verbose", False):
+            extra.append("--verbose")
         if getattr(args, "vcf", None):
             extra.extend(["--vcf", args.vcf])
         if getattr(args, "qc", None):
@@ -1092,6 +1263,10 @@ def main():
             extra.extend(["--layer", args.layer])
         if getattr(args, "batch_key", None):
             extra.extend(["--batch-key", args.batch_key])
+        if getattr(args, "labels_key", None):
+            extra.extend(["--labels-key", args.labels_key])
+        if getattr(args, "unlabeled_category", None):
+            extra.extend(["--unlabeled-category", args.unlabeled_category])
         if getattr(args, "min_genes", None) is not None:
             extra.extend(["--min-genes", str(args.min_genes)])
         if getattr(args, "min_cells", None) is not None:
@@ -1120,30 +1295,44 @@ def main():
             extra.extend(["--accelerator", args.accelerator])
         if getattr(args, "contrast_groupby", None):
             extra.extend(["--contrast-groupby", args.contrast_groupby])
-        if getattr(args, "contrast_group1", None):
-            extra.extend(["--contrast-group1", args.contrast_group1])
-        if getattr(args, "contrast_group2", None):
-            extra.extend(["--contrast-group2", args.contrast_group2])
+        if getattr(args, "contrast_scope", None):
+            extra.extend(["--contrast-scope", args.contrast_scope])
+        if getattr(args, "contrast_clusterby", None):
+            extra.extend(["--contrast-clusterby", args.contrast_clusterby])
         if getattr(args, "contrast_top_genes", None) is not None:
             extra.extend(["--contrast-top-genes", str(args.contrast_top_genes)])
-        if getattr(args, "contrast_volcano", False):
-            extra.append("--contrast-volcano")
-        if getattr(args, "de_groupby", None):
-            extra.extend(["--de-groupby", args.de_groupby])
-        if getattr(args, "de_group1", None):
-            extra.extend(["--de-group1", args.de_group1])
-        if getattr(args, "de_group2", None):
-            extra.extend(["--de-group2", args.de_group2])
-        if getattr(args, "de_top_genes", None) is not None:
-            extra.extend(["--de-top-genes", str(args.de_top_genes)])
-        if getattr(args, "de_volcano", False):
-            extra.append("--de-volcano")
         if getattr(args, "doublet_method", None):
             extra.extend(["--doublet-method", args.doublet_method])
         if getattr(args, "annotate", None):
             extra.extend(["--annotate", args.annotate])
         if getattr(args, "annotation_model", None):
             extra.extend(["--annotation-model", args.annotation_model])
+        if getattr(args, "search", None):
+            extra.extend(["--search", args.search])
+        if getattr(args, "recommend", None):
+            extra.extend(["--recommend", args.recommend])
+        if getattr(args, "workflow", None):
+            extra.extend(["--workflow", args.workflow])
+        if getattr(args, "package_details", None):
+            extra.extend(["--package-details", args.package_details])
+        if getattr(args, "docs_search", None):
+            extra.extend(["--docs-search", args.docs_search])
+        if getattr(args, "package_docs", None):
+            extra.extend(["--package-docs", args.package_docs])
+        if getattr(args, "list_domains", False):
+            extra.append("--list-domains")
+        if getattr(args, "setup", False):
+            extra.append("--setup")
+        if getattr(args, "install", None):
+            extra.extend(["--install", args.install])
+        if getattr(args, "skill_format", None):
+            extra.extend(["--format", args.skill_format])
+        if getattr(args, "container", None):
+            extra.extend(["--container", args.container])
+        if getattr(args, "modality", None):
+            extra.extend(["--modality", args.modality])
+        if getattr(args, "max_results", None) is not None:
+            extra.extend(["--max-results", str(args.max_results)])
 
         result = run_skill(
             skill_name=args.skill,

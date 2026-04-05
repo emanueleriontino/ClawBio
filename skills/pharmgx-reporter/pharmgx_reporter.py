@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 ClawBio PharmGx Reporter
 Pharmacogenomic report generator from DTC genetic data (23andMe/AncestryDNA).
 
-Analyses 31 pharmacogenomic SNPs across 12 genes, calls star alleles and
-metabolizer phenotypes, and looks up CPIC drug recommendations for 51 medications.
+Analyses 33 pharmacogenomic SNPs across 13 genes, calls star alleles and
+metabolizer phenotypes, and looks up CPIC drug recommendations for 59 medications.
 
 Usage:
     python pharmgx_reporter.py --input patient_data.txt --output report_dir
@@ -27,6 +28,18 @@ from clawbio.common.parsers import parse_genetic_file, genotypes_to_simple
 from clawbio.common.checksums import sha256_hex, sha256_file
 from clawbio.common.report import write_result_json, DISCLAIMER
 from clawbio.common.html_report import HtmlReportBuilder, write_html_report
+
+# ---------------------------------------------------------------------------
+# Strand utilities (mirrors nutrigx_advisor/extract_genotypes.py)
+# ---------------------------------------------------------------------------
+
+COMPLEMENT = {"A": "T", "T": "A", "C": "G", "G": "C"}
+
+
+def flip_genotype(genotype: str) -> str:
+    """Return the complement strand genotype (e.g. 'GA' → 'CT')."""
+    return "".join(COMPLEMENT.get(b, b) for b in genotype)
+
 
 # ---------------------------------------------------------------------------
 # 1. PGx SNP definitions (ported from PharmXD snp-parser.js)
@@ -75,6 +88,9 @@ PGX_SNPS = {
     # CYP1A2
     "rs762551":   {"gene": "CYP1A2", "allele": "*1F", "effect": "increased_function"},
     "rs2069514":  {"gene": "CYP1A2", "allele": "*1C", "effect": "decreased_function"},
+    # MTHFR
+    "rs1801133":  {"gene": "MTHFR", "allele": "677T",  "effect": "decreased_function"},
+    "rs1801131":  {"gene": "MTHFR", "allele": "1298C", "effect": "decreased_function"},
 }
 
 # ---------------------------------------------------------------------------
@@ -261,6 +277,24 @@ GENE_DEFS = {
             "Normal Metabolizer":       ["*1/*1", "*1/*1F"],
             "Intermediate Metabolizer": ["*1/*1C", "*1C/*1F"],
             "Poor Metabolizer":         ["*1C/*1C"],
+        },
+    },
+    "MTHFR": {
+        "name": "Methylenetetrahydrofolate Reductase",
+        "function": "Folate metabolism; affects methotrexate toxicity",
+        "type": "mthfr",
+        "rsid_677": "rs1801133",
+        "rsid_1298": "rs1801131",
+        "variants": {
+            "rs1801133": {"allele": "677T",  "alt": "T", "effect": "decreased_function"},
+            "rs1801131": {"allele": "1298C", "alt": "C", "effect": "decreased_function"},
+        },
+        "phenotypes": {
+            # Activity labels follow CPIC MTHFR nomenclature
+            "Normal Activity":        ["677CC/1298AA", "677CC/1298NOT_TESTED",
+                                       "677NOT_TESTED/1298AA"],
+            "Intermediate Activity":  ["677CT/1298AA", "677CC/1298AC"],
+            "Reduced Activity":       ["677TT/1298AA", "677CT/1298AC"],
         },
     },
 }
@@ -648,6 +682,67 @@ GUIDELINES = {
             "intermediate_metabolizer": "standard", "poor_metabolizer": "caution",
         },
     },
+    # --- MTHFR drug ---
+    "Methotrexate": {
+        "brand": "Rheumatrex / Trexall", "class": "DMARD / Antineoplastic", "gene": "MTHFR",
+        "recs": {
+            "normal_activity": "standard",
+            "intermediate_activity": "caution",
+            "reduced_activity": "caution",
+        },
+    },
+    # --- Additional CYP2C9 NSAIDs ---
+    "Diclofenac": {
+        "brand": "Voltaren", "class": "NSAID", "gene": "CYP2C9",
+        "recs": {
+            "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "caution", "poor_metabolizer": "avoid",
+        },
+    },
+    "Ibuprofen": {
+        "brand": "Advil / Motrin", "class": "NSAID", "gene": "CYP2C9",
+        "recs": {
+            "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "caution", "poor_metabolizer": "caution",
+        },
+    },
+    "Naproxen": {
+        "brand": "Aleve / Naprosyn", "class": "NSAID", "gene": "CYP2C9",
+        "recs": {
+            "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "caution", "poor_metabolizer": "caution",
+        },
+    },
+    # --- Additional CYP2D6 drugs ---
+    "Dextromethorphan": {
+        "brand": "Robitussin DM", "class": "Antitussive", "gene": "CYP2D6",
+        "recs": {
+            "ultrarapid_metabolizer": "caution", "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "standard", "poor_metabolizer": "caution",
+        },
+    },
+    "Propafenone": {
+        "brand": "Rythmol", "class": "Antiarrhythmic", "gene": "CYP2D6",
+        "recs": {
+            "ultrarapid_metabolizer": "caution", "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "caution", "poor_metabolizer": "avoid",
+        },
+    },
+    # --- Additional CYP2B6 drugs ---
+    "Methadone": {
+        "brand": "Dolophine", "class": "Opioid Analgesic", "gene": "CYP2B6",
+        "recs": {
+            "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "caution", "poor_metabolizer": "caution",
+        },
+    },
+    "Bupropion": {
+        "brand": "Wellbutrin / Zyban", "class": "Antidepressant / Smoking Cessation", "gene": "CYP2B6",
+        "recs": {
+            "normal_metabolizer": "standard",
+            "intermediate_metabolizer": "standard", "poor_metabolizer": "caution",
+        },
+    },
 }
 
 
@@ -721,16 +816,19 @@ def lookup_single_drug(drug_name, profiles):
 
     # Warfarin is multi-gene special case
     if info.get("special") == "warfarin":
-        classification = get_warfarin_rec(profiles)
+        classification, warfarin_note = get_warfarin_rec(profiles)
         cyp2c9 = profiles.get("CYP2C9", {})
         vkorc1 = profiles.get("VKORC1", {})
-        return {
+        result = {
             "drug": drug_name, "brand": info["brand"], "class": info["class"],
             "gene": "CYP2C9 + VKORC1",
             "diplotype": f"CYP2C9 {cyp2c9.get('diplotype', '?')} / VKORC1 {vkorc1.get('diplotype', '?')}",
             "phenotype": f"CYP2C9 {cyp2c9.get('phenotype', '?')} / VKORC1 {vkorc1.get('phenotype', '?')}",
             "classification": classification,
         }
+        if warfarin_note:
+            result["note"] = warfarin_note
+        return result
 
     gene = info["gene"]
     if gene not in profiles:
@@ -773,7 +871,7 @@ def format_dosage_card(result, visible_dose=None):
         "avoid": "Consider alternative medication.",
         "indeterminate": "Insufficient data for recommendation.",
     }
-    rec_text = _CLS_TEXT.get(cl, "")
+    rec_text = result.get("note") or _CLS_TEXT.get(cl, "")
     if visible_dose:
         if cl == "standard":
             rec_text = f"Your genotype supports {result['drug']} {visible_dose} as prescribed."
@@ -878,6 +976,22 @@ def parse_file(path):
 def call_diplotype(gene, pgx_snps):
     gdef = GENE_DEFS[gene]
 
+    if gdef.get("type") == "mthfr":
+        # Build combined diplotype: "677{CT}/1298{AC}" using CPIC gene-strand notation.
+        # 23andMe reports on the forward (+) strand; MTHFR is on the minus strand,
+        # so alleles are complemented via flip_genotype before phenotype lookup.
+        rsid_677  = gdef["rsid_677"]
+        rsid_1298 = gdef["rsid_1298"]
+        gt_677  = pgx_snps[rsid_677]["genotype"]  if rsid_677  in pgx_snps else "NOT_TESTED"
+        gt_1298 = pgx_snps[rsid_1298]["genotype"] if rsid_1298 in pgx_snps else "NOT_TESTED"
+        if gt_677 == "NOT_TESTED" and gt_1298 == "NOT_TESTED":
+            return "NOT_TESTED"
+        if gt_677 != "NOT_TESTED":
+            gt_677  = "".join(sorted(flip_genotype(gt_677)))
+        if gt_1298 != "NOT_TESTED":
+            gt_1298 = "".join(sorted(flip_genotype(gt_1298)))
+        return f"677{gt_677}/1298{gt_1298}"
+
     if gdef.get("type") == "genotype":
         rsid = gdef["rsid"]
         if rsid in pgx_snps:
@@ -980,6 +1094,10 @@ def phenotype_to_key(phenotype_desc):
         "CYP3A5 Expressor": "extensive_metabolizer",
         "Intermediate Expressor": "intermediate_metabolizer",
         "CYP3A5 Non-expressor": "poor_metabolizer",
+        # MTHFR activity labels
+        "Normal Activity": "normal_activity",
+        "Intermediate Activity": "intermediate_activity",
+        "Reduced Activity": "reduced_activity",
     }
     # Try exact match first, then strip qualifiers like "(inferred)"
     key = mapping.get(phenotype_desc)
@@ -1014,11 +1132,11 @@ def get_warfarin_rec(profiles):
     vkorc1_normal = "normal" in vkorc1.lower()
 
     if cyp2c9_normal and vkorc1_normal:
-        return "standard"
+        return "standard", None
     elif "poor" in cyp2c9.lower() or "high" in vkorc1.lower():
-        return "avoid"
+        return "avoid", None
     else:
-        return "caution"
+        return "caution", None
 
 
 def lookup_drugs(profiles):
@@ -1026,12 +1144,15 @@ def lookup_drugs(profiles):
 
     for drug_name, drug in GUIDELINES.items():
         if drug.get("special") == "warfarin":
-            classification = get_warfarin_rec(profiles)
-            results.setdefault(classification, []).append({
+            classification, warfarin_note = get_warfarin_rec(profiles)
+            entry = {
                 "drug": drug_name, "brand": drug["brand"],
                 "class": drug["class"], "gene": "CYP2C9+VKORC1",
                 "classification": classification,
-            })
+            }
+            if warfarin_note:
+                entry["note"] = warfarin_note
+            results.setdefault(classification, []).append(entry)
             continue
 
         gene = drug["gene"]
@@ -1435,7 +1556,8 @@ def generate_report(input_path, fmt, total_snps, pgx_snps, profiles, drug_result
     for cat in ["avoid", "caution", "indeterminate", "standard"]:
         for d in sorted(drug_results.get(cat, []), key=lambda x: x["drug"]):
             status = ICON.get(d["classification"], d["classification"].upper())
-            lines.append(f"| {d['drug']} | {d['brand']} | {d['class']} | {d['gene']} | {status} |")
+            note_suffix = f" — {d['note']}" if d.get("note") else ""
+            lines.append(f"| {d['drug']} | {d['brand']} | {d['class']} | {d['gene']} | {status}{note_suffix} |")
     lines.append("")
 
     # Disclaimer
@@ -1596,6 +1718,8 @@ def generate_html_report(input_path, fmt, total_snps, pgx_snps, profiles, drug_r
         evidence_cell = _evidence_level_html(enrichment_entry)
         rec_cell = badge + _evidence_cell_html(enrichment_entry, classification=cls)
         notes_cell = _html.escape(d['class'])
+        if d.get("note"):
+            notes_cell += f'<br><small style="color:#c0392b">{_html.escape(d["note"])}</small>'
         links_cell = _drug_links_html(d["gene"], gene_rsid_map)
 
         return (
@@ -1705,12 +1829,27 @@ def generate_html_report(input_path, fmt, total_snps, pgx_snps, profiles, drug_r
 def main():
     parser = argparse.ArgumentParser(
         description="ClawBio PharmGx Reporter: pharmacogenomic report from DTC genetic data")
-    parser.add_argument("--input", required=True, help="Path to genetic data file (23andMe/AncestryDNA)")
+    parser.add_argument("--input", default=None, help="Path to genetic data file (23andMe/AncestryDNA)")
     parser.add_argument("--output", default="pharmgx_report", help="Output directory (default: pharmgx_report)")
     parser.add_argument("--drug", default=None, help="Single drug lookup (brand or generic name)")
     parser.add_argument("--dose", default=None, help="Visible dose from packaging (e.g. '50mg')")
     parser.add_argument("--no-enrich", action="store_true", help="Skip ClinPGx evidence enrichment")
+    parser.add_argument("--demo", action="store_true", help="Run with bundled demo patient data")
     args = parser.parse_args()
+
+    if args.demo:
+        demo_file = Path(__file__).resolve().parent / "demo_patient.txt"
+        if not demo_file.exists():
+            print("Error: demo_patient.txt not found alongside script", file=sys.stderr)
+            sys.exit(1)
+        args.input = str(demo_file)
+        if args.output == "pharmgx_report":
+            args.output = str(Path(__file__).resolve().parent / "demo_report")
+        print("Running in demo mode with bundled patient data")
+        print()
+
+    if not args.input:
+        parser.error("--input is required (or use --demo)")
 
     if not Path(args.input).exists():
         print(f"Error: input file not found: {args.input}", file=sys.stderr)

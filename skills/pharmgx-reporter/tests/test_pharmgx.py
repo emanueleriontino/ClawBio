@@ -22,7 +22,10 @@ from pharmgx_reporter import (
     call_diplotype,
     call_phenotype,
     phenotype_to_key,
+    get_warfarin_rec,
     lookup_drugs,
+    lookup_single_drug,
+    format_dosage_card,
     generate_report,
     generate_html_report,
     enrich_with_clinpgx,
@@ -43,9 +46,9 @@ def test_detect_format_23andme():
 def test_parse_file_finds_all_pgx_snps():
     fmt, total_snps, pgx_snps = parse_file(str(DEMO))
     assert fmt == "23andme"
-    assert total_snps == 21  # 21 PGx SNPs present on the 23andMe v5 chip (Corpasome)
-    assert len(pgx_snps) == 21, (
-        f"Expected 21 PGx SNPs (Corpasome v5 chip coverage), got {len(pgx_snps)}"
+    assert total_snps == 23  # 23 PGx SNPs present on the 23andMe v5 chip (Corpasome, incl. MTHFR)
+    assert len(pgx_snps) == 23, (
+        f"Expected 23 PGx SNPs (Corpasome v5 chip coverage), got {len(pgx_snps)}"
     )
 
 
@@ -132,6 +135,37 @@ def test_cyp3a5_nonexpressor():
     assert p["CYP3A5"]["phenotype"] == "CYP3A5 Non-expressor"
 
 
+def test_mthfr_forward_strand_conversion_hom_1298():
+    """677GG/1298GG (raw 23andMe fwd-strand) → CPIC 677CC/1298CC."""
+    pgx = {
+        "rs1801133": {"genotype": "GG", "gene": "MTHFR", "allele": "677T", "effect": "decreased_function"},
+        "rs1801131": {"genotype": "GG", "gene": "MTHFR", "allele": "1298C", "effect": "decreased_function"},
+    }
+    diplotype = call_diplotype("MTHFR", pgx)
+    assert diplotype == "677CC/1298CC", f"Expected 677CC/1298CC, got {diplotype}"
+
+
+def test_mthfr_forward_strand_conversion_corpas():
+    """Manuel Corpas fwd-strand rs1801133=GG, rs1801131=GT → CPIC 677CC/1298AC → Intermediate Activity."""
+    pgx = {
+        "rs1801133": {"genotype": "GG", "gene": "MTHFR", "allele": "677T", "effect": "decreased_function"},
+        "rs1801131": {"genotype": "GT", "gene": "MTHFR", "allele": "1298C", "effect": "decreased_function"},
+    }
+    diplotype = call_diplotype("MTHFR", pgx)
+    assert diplotype == "677CC/1298AC", f"Expected 677CC/1298AC, got {diplotype}"
+    assert call_phenotype("MTHFR", diplotype) == "Intermediate Activity"
+
+
+def test_mthfr_level2_reduced():
+    """MTHFR 677TT/1298AA: Level 2 CPIC guideline → Reduced Activity."""
+    assert call_phenotype("MTHFR", "677TT/1298AA") == "Reduced Activity"
+
+
+def test_mthfr_level2_intermediate():
+    """MTHFR 677CT/1298AA: Level 2 CPIC guideline → Intermediate Activity."""
+    assert call_phenotype("MTHFR", "677CT/1298AA") == "Intermediate Activity"
+
+
 def test_dpyd_normal():
     """All DPYD SNPs are ref → Normal Metabolizer."""
     p = _profiles()
@@ -177,6 +211,124 @@ def test_simvastatin_standard_for_normal_slco1b1():
     results = lookup_drugs(p)
     simva = [d for d in results["standard"] if d["drug"] == "Simvastatin"]
     assert len(simva) == 1, "Simvastatin should be in standard list for SLCO1B1 Normal Function"
+
+
+def test_warfarin_avoid_for_high_vkorc1_sensitivity():
+    """Demo patient VKORC1 TT → High Warfarin Sensitivity → warfarin should be avoid."""
+    p = _profiles()
+    results = lookup_drugs(p)
+    warfarin = [d for d in results.get("avoid", []) if d["drug"].lower() == "warfarin"]
+    assert len(warfarin) == 1, "Warfarin should be in avoid list for High Warfarin Sensitivity"
+
+
+# ── get_warfarin_rec ──────────────────────────────────────────────────────────
+
+def test_get_warfarin_rec_returns_tuple():
+    """get_warfarin_rec must always return a (classification, note) tuple."""
+    result = get_warfarin_rec(_profiles())
+    assert isinstance(result, tuple) and len(result) == 2
+
+
+def test_get_warfarin_rec_standard():
+    profiles = {
+        "CYP2C9": {"phenotype": "Normal Metabolizer"},
+        "VKORC1": {"phenotype": "Normal Sensitivity"},
+    }
+    cls, note = get_warfarin_rec(profiles)
+    assert cls == "standard"
+    assert note is None
+
+
+def test_get_warfarin_rec_avoid_high_vkorc1():
+    profiles = {
+        "CYP2C9": {"phenotype": "Normal Metabolizer"},
+        "VKORC1": {"phenotype": "High Warfarin Sensitivity"},
+    }
+    cls, note = get_warfarin_rec(profiles)
+    assert cls == "avoid"
+    assert note is None
+
+
+def test_get_warfarin_rec_avoid_poor_cyp2c9():
+    profiles = {
+        "CYP2C9": {"phenotype": "Poor Metabolizer"},
+        "VKORC1": {"phenotype": "Normal Sensitivity"},
+    }
+    cls, note = get_warfarin_rec(profiles)
+    assert cls == "avoid"
+    assert note is None
+
+
+def test_get_warfarin_rec_indeterminate_missing_cyp2c9():
+    """Missing CYP2C9 → indeterminate with a non-None note."""
+    cls, note = get_warfarin_rec({"VKORC1": {"phenotype": "Normal Sensitivity"}})
+    assert cls == "indeterminate"
+    assert note is not None and "CYP2C9" in note
+
+
+def test_get_warfarin_rec_indeterminate_missing_vkorc1():
+    """Missing VKORC1 → indeterminate with a non-None note."""
+    cls, note = get_warfarin_rec({"CYP2C9": {"phenotype": "Normal Metabolizer"}})
+    assert cls == "indeterminate"
+    assert note is not None and "VKORC1" in note
+
+
+def test_lookup_drugs_warfarin_note_field_when_indeterminate():
+    """When warfarin is indeterminate, the entry must carry a 'note' key."""
+    p = _profiles()
+    p["CYP2C9"] = {"diplotype": "?", "phenotype": ""}
+    p["VKORC1"] = {"diplotype": "?", "phenotype": ""}
+    results = lookup_drugs(p)
+    warfarin_entries = [
+        d for cat in results.values() for d in cat if d["drug"].lower() == "warfarin"
+    ]
+    assert len(warfarin_entries) == 1
+    assert "note" in warfarin_entries[0]
+    assert warfarin_entries[0]["note"]
+
+
+def test_lookup_drugs_warfarin_no_note_when_avoid():
+    """When warfarin is avoid (no note), the 'note' key should be absent."""
+    profiles = {
+        "CYP2C9": {"phenotype": "Normal Metabolizer"},
+        "VKORC1": {"phenotype": "High Warfarin Sensitivity"},
+    }
+    # Merge with full profiles so non-warfarin lookups don't KeyError
+    p = _profiles()
+    p["CYP2C9"] = profiles["CYP2C9"]
+    p["VKORC1"] = profiles["VKORC1"]
+    results = lookup_drugs(p)
+    warfarin_entries = [d for d in results.get("avoid", []) if d["drug"].lower() == "warfarin"]
+    assert len(warfarin_entries) == 1
+    assert "note" not in warfarin_entries[0]
+
+
+# ── format_dosage_card note override ─────────────────────────────────────────
+
+def _minimal_result(classification, note=None):
+    r = {
+        "drug": "Warfarin", "brand": "Coumadin", "class": "Anticoagulant",
+        "gene": "CYP2C9 + VKORC1",
+        "diplotype": "CYP2C9 *1/*1 / VKORC1 TT",
+        "phenotype": "Normal / High Warfarin Sensitivity",
+        "classification": classification,
+    }
+    if note:
+        r["note"] = note
+    return r
+
+
+def test_format_dosage_card_uses_note_over_default_text():
+    # Note is word-wrapped in the card; check a substring that fits on one line.
+    custom_note = "CYP2C9 not genotyped. Clinical testing recommended."
+    card = format_dosage_card(_minimal_result("indeterminate", note=custom_note))
+    assert "CYP2C9 not genotyped" in card
+    assert "Insufficient data" not in card  # default text should be suppressed
+
+
+def test_format_dosage_card_falls_back_to_cls_text_without_note():
+    card = format_dosage_card(_minimal_result("caution"))
+    assert "Dose adjustment" in card
 
 
 # ── Phenotype Key Mapping ─────────────────────────────────────────────────────

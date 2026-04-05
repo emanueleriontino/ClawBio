@@ -71,6 +71,8 @@ EXTENSION_MAP: dict[str, str] = {
     ".h5ad": "scrna-orchestrator",
     ".mtx": "scrna-orchestrator",
     ".mtx.gz": "scrna-orchestrator",
+    ".pkl": "methylation-clock",
+    ".pickle": "methylation-clock",
     ".csv": "equity-scorer",
     ".tsv": "equity-scorer",
     ".png": "data-extractor",
@@ -89,6 +91,7 @@ KEYWORD_MAP: dict[str, str] = {
     "dragen": "illumina-bridge",
     "illumina": "illumina-bridge",
     "scvi": "scrna-embedding",
+    "scanvi": "scrna-embedding",
     "batch correction": "scrna-embedding",
     "batch integration": "scrna-embedding",
     "integration": "scrna-embedding",
@@ -159,6 +162,18 @@ KEYWORD_MAP: dict[str, str] = {
     "bar chart": "data-extractor",
     "scatter plot": "data-extractor",
     "meta-analysis": "data-extractor",
+    "bioconductor": "bioconductor-bridge",
+    "biocmanager": "bioconductor-bridge",
+    "summarizedexperiment": "bioconductor-bridge",
+    "singlecellexperiment": "bioconductor-bridge",
+    "genomicranges": "bioconductor-bridge",
+    "variantannotation": "bioconductor-bridge",
+    "annotationhub": "bioconductor-bridge",
+    "experimenthub": "bioconductor-bridge",
+    "what package should i use": "bioconductor-bridge",
+    "which bioconductor package": "bioconductor-bridge",
+    "set up bioconductor": "bioconductor-bridge",
+    "setup bioconductor": "bioconductor-bridge",
     "visualize de results": "diff-visualizer",
     "visualise de results": "diff-visualizer",
     "de visualization": "diff-visualizer",
@@ -175,6 +190,17 @@ KEYWORD_MAP: dict[str, str] = {
     "ma plot": "rnaseq-de",
     "contrast": "rnaseq-de",
     "count matrix": "rnaseq-de",
+    "epigenetic age": "methylation-clock",
+    "methylation": "methylation-clock",
+    "methylation clock": "methylation-clock",
+    "dna methylation": "methylation-clock",
+    "pyaging": "methylation-clock",
+    "horvath": "methylation-clock",
+    "altumage": "methylation-clock",
+    "grimage": "methylation-clock",
+    "dunedinpace": "methylation-clock",
+    "geo accession": "methylation-clock",
+    "gse": "methylation-clock",
 }
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
@@ -322,6 +348,12 @@ def detect_skill_from_tabular_header(filepath: Path) -> str | None:
                 continue
         if numeric_count >= 3:
             return "rnaseq-de"
+
+    methylation_markers = {"gender", "sex", "female", "tissue_type", "dataset"}
+    if header_set & methylation_markers:
+        cg_like = [h for h in headers if h.startswith("cg")]
+        if len(cg_like) >= 10:
+            return "methylation-clock"
 
     return None
 
@@ -512,6 +544,7 @@ SKILL_REGISTRY_MAP: dict[str, str] = {
     "gwas-lookup": "gwas",
     "profile-report": "profile",
     "illumina-bridge": "illumina",
+    "bioconductor-bridge": "bioc",
     "data-extractor": "data-extract",
     "rnaseq-de": "rnaseq",
     "diff-visualizer": "diffviz",

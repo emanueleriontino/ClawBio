@@ -17,22 +17,31 @@ When the user asks a question, match it to a skill and act:
 | Route a query, multi-step analysis, "what skill should I use" | `skills/bio-orchestrator/` | Run `orchestrator.py` |
 | Variant annotation, VEP, ClinVar, gnomAD | `skills/vcf-annotator/` | Read SKILL.md, apply methodology |
 | Literature search, PubMed, bioRxiv, citation graph | `skills/lit-synthesizer/` | Read SKILL.md, apply methodology |
+| PubMed search, "summarise PubMed papers about X", "recent papers on gene/disease", research briefing, gene papers, disease papers | `skills/pubmed-summariser/` | Run `pubmed_summariser.py` |
 | Single-cell RNA-seq, Scanpy, clustering, marker genes, doublet removal, h5ad | `skills/scrna-orchestrator/` | Run `scrna_orchestrator.py` |
 | Protein structure, AlphaFold, PDB, Boltz | `skills/struct-predictor/` | Read SKILL.md, apply methodology |
 | Reproducibility, Nextflow, Singularity, Conda export | `skills/repro-enforcer/` | Read SKILL.md, apply methodology |
 | Sequence QC, FASTQ, alignment, BAM, trimming | `skills/seq-wrangler/` | Read SKILL.md, apply methodology |
-| Lab notebook, experiments, protocols, inventory, Labstep | `skills/labstep/` | Read SKILL.md, apply methodology |
+| Lab notebook, experiments, protocols, inventory, Labstep | `skills/labstep/` | Run `labstep.py` |
 | ClinPGx database, gene-drug lookup, PharmGKB query, CPIC guideline database, FDA drug label PGx, "look up gene on ClinPGx" | `skills/clinpgx/` | Run `clinpgx.py` |
 | GWAS polygenic risk scores, PRS, "what's my risk for diabetes", PGS Catalog, polygenic | `skills/gwas-prs/` | Run `gwas_prs.py` |
 | GWAS variant lookup, rsID search, "look up rs3798220", variant associations, PheWAS, variant eQTL, federated variant query | `skills/gwas-lookup/` | Run `gwas_lookup.py` |
+| Epigenetic age, methylation clocks, PyAging, Horvath, GrimAge, DunedinPACE, GEO methylation | `skills/methylation-clock/` | Run `methylation_clock.py` |
 | Personal genomic profile report, "my profile", unified report, profile summary | `skills/profile-report/` | Run `profile_report.py` |
 | UK Biobank, UKB fields, "what UKB variables measure X", biobank schema search, UKB field lookup, data showcase | `skills/ukb-navigator/` | Run `ukb_navigator.py` |
 | Galaxy, usegalaxy, tool shed, bioblend, "run on galaxy", galaxy tool, galaxy workflow, NGS pipeline | `skills/galaxy-bridge/` | Run `galaxy_bridge.py` |
 | Bulk RNA-seq, pseudo-bulk, differential expression, DESeq2, PyDESeq2, contrast, volcano plot | `skills/rnaseq-de/` | Run `rnaseq_de.py` |
+| protocols.io, protocol search, lab protocol, scientific methods, protocol DOI, protocol steps | `skills/protocols-io/` | Run `protocols_io.py` |
+| Soul to genome, compile soul, synthetic genome, Genomebook compile, character genome | `skills/soul2dna/` | Run `soul2dna.py` |
+| Genome compatibility, mating pairs, heterozygosity, Genomebook match, breeding pairs | `skills/genome-match/` | Run `genome_match.py` |
+| Recombination, offspring, breed, meiosis, next generation, Genomebook breed | `skills/recombinator/` | Run `recombinator.py` |
+| Fine-mapping, SuSiE, ABF, credible sets, PIP, posterior inclusion probability, causal variant, fine map locus, FINEMAP, polyfun | `skills/fine-mapping/` | Run `fine_mapping.py` |
+| LLM benchmark, benchmark language models, biobank knowledge retrieval, coverage score, weighted coverage, model comparison biobank, semantic similarity benchmark | `skills/llm-biobank-bench/` | Read SKILL.md, apply methodology |
+| Cell segmentation, nucleus segmentation, microscopy, fluorescence microscopy, cellpose, cpsam, image segmentation, cell counting, segmentation mask | `skills/cell-detection/` | Run `cell_detection.py` |
 
 ## How to Use a Skill
 
-### Skills with Python scripts (pharmgx-reporter, equity-scorer, nutrigx_advisor, scrna-orchestrator, bio-orchestrator, clinpgx, gwas-prs, gwas-lookup, profile-report, ukb-navigator, galaxy-bridge)
+### Skills with Python scripts (pharmgx-reporter, equity-scorer, nutrigx_advisor, scrna-orchestrator, bio-orchestrator, clinpgx, gwas-prs, gwas-lookup, profile-report, ukb-navigator, galaxy-bridge, rnaseq-de, methylation-clock, protocols-io, soul2dna, genome-match, recombinator, labstep, fine-mapping, cell-detection)
 1. Read the skill's `SKILL.md` for domain context
 2. Run the Python script with correct CLI arguments (see below)
 3. Show the user the output — open any generated figures and explain results
@@ -116,6 +125,11 @@ python skills/galaxy-bridge/galaxy_bridge.py \
   --run <tool_id> --input <file> --output <dir>
 python skills/galaxy-bridge/galaxy_bridge.py --demo
 
+# PubMed research briefing from gene name or disease term
+python skills/pubmed-summariser/pubmed_summariser.py \
+  --query <gene_or_disease> --output <report_dir>
+python skills/pubmed-summariser/pubmed_summariser.py --demo --output /tmp/pubmed_demo
+
 # Bio orchestrator — auto-routes to the right skill
 python skills/bio-orchestrator/orchestrator.py \
   --input <file_or_query> [--skill <name>] [--output <dir>] [--list-skills]
@@ -124,6 +138,57 @@ python skills/bio-orchestrator/orchestrator.py \
 python skills/rnaseq-de/rnaseq_de.py \
   --counts <counts_csv_or_tsv> --metadata <metadata_csv_or_tsv> \
   --formula "~ batch + condition" --contrast "condition,treated,control" --output <report_dir>
+
+# Protocols.io bridge — search, retrieve, authenticate
+python skills/protocols-io/protocols_io.py --login
+python skills/protocols-io/protocols_io.py --search "CRISPR gene editing"
+python skills/protocols-io/protocols_io.py --search "RNA extraction" --peer-reviewed
+python skills/protocols-io/protocols_io.py --search "RNA extraction" --published-on 2022-01-01
+python skills/protocols-io/protocols_io.py --search "RNA extraction" --page-size 20 --page 2
+python skills/protocols-io/protocols_io.py --search "RNA extraction" --filter user_private
+python skills/protocols-io/protocols_io.py --protocol <id_or_uri_or_doi>
+python skills/protocols-io/protocols_io.py --protocol <id_or_uri_or_doi> --output /tmp/protocols_io
+python skills/protocols-io/protocols_io.py --steps <id_or_uri>
+python skills/protocols-io/protocols_io.py --demo
+
+# Soul2DNA — compile SOUL.md profiles to synthetic genomes
+python skills/soul2dna/soul2dna.py --demo
+python skills/soul2dna/soul2dna.py
+
+# GenomeMatch — score genetic compatibility across all M x F pairings
+python skills/genome-match/genome_match.py --demo
+python skills/genome-match/genome_match.py --generation 0 --top 10
+
+# Recombinator — breed offspring via meiotic recombination
+python skills/recombinator/recombinator.py --demo
+python skills/recombinator/recombinator.py \
+  --father einstein-g0 --mother anning-g0 --offspring 3 --generation 1
+
+# SuSiE fine-mapping — credible sets and PIPs from GWAS summary stats
+python skills/fine-mapping/fine_mapping.py \
+  --sumstats locus.tsv --output <report_dir>
+python skills/fine-mapping/fine_mapping.py \
+  --sumstats locus.tsv --ld ld_matrix.npy --output <report_dir>
+python skills/fine-mapping/fine_mapping.py \
+  --sumstats gwas_full.tsv --chr 1 --start 109000000 --end 110000000 \
+  --ld ld_matrix.npy --output <report_dir>
+python skills/fine-mapping/fine_mapping.py --demo --output /tmp/finemapping_demo
+
+# CellposeSAM — cell segmentation from fluorescence microscopy images
+# cpsam is channel-order invariant; pass greyscale or up to 3 channels directly
+python skills/cell-detection/cell_detection.py \
+  --input <image.tif> --output <report_dir>
+python skills/cell-detection/cell_detection.py \
+  --input <image.tif> --exclude_on_edges --output <report_dir>
+python skills/cell-detection/cell_detection.py --demo --output /tmp/cell_detection_demo
+
+# Labstep ELN bridge — experiments, protocols, inventory
+python skills/labstep/labstep.py --demo
+python skills/labstep/labstep.py --experiments [--search QUERY] [--count N]
+python skills/labstep/labstep.py --experiment-id ID
+python skills/labstep/labstep.py --protocols [--search QUERY] [--count N]
+python skills/labstep/labstep.py --protocol-id ID
+python skills/labstep/labstep.py --inventory [--search QUERY]
 ```
 
 ## Demo Data
@@ -145,9 +210,24 @@ For instant demos when the user has no data:
 | Synthetic patient (PRS, ~300 SNPs) | `skills/gwas-prs/demo_patient_prs.txt` | gwas-prs |
 | Curated PGS scores (6 traits) | `skills/gwas-prs/curated_scores.json` | gwas-prs |
 | GWAS Lookup demo (rs3798220, pre-fetched) | `--demo` flag | gwas-lookup |
+| Methylation demo subset (GSE139307, 2 samples) | `skills/methylation-clock/data/GSE139307_small.csv.gz` | methylation-clock |
 | Profile report demo (full 4-skill profile) | `--demo` flag | profile-report |
 | UKB Navigator demo (blood pressure, pre-cached) | `--demo` flag | ukb-navigator |
 | Galaxy Bridge demo (FastQC, offline) | `--demo` flag | galaxy-bridge |
+| Protocols.io demo (RNA extraction, pre-cached) | `--demo` flag | protocols-io |
+| Soul2DNA demo (20 historical figures) | `--demo` flag | soul2dna |
+| GenomeMatch demo (generation-0 pairings) | `--demo` flag | genome-match |
+| Recombinator demo (Einstein x Anning, 3 offspring) | `--demo` flag | recombinator |
+| Labstep demo (3 experiments, protocols, inventory) | `--demo` flag | labstep |
+| Fine-mapping demo (200-variant locus, 2 causal signals, SuSiE) | `--demo` flag | fine-mapping |
+| CellposeSAM demo (synthetic 512×512 fluorescence nuclei image, ~67 cells) | `--demo` flag | cell-detection |
+| Corpas 30x chr20 SNPs + indels (WGS) | `corpas-30x/subsets/chr20_snps_indels.vcf.gz` | variant-annotation, equity-scorer |
+| Corpas 30x SV calls (WGS) | `corpas-30x/subsets/sv_calls.vcf.gz` | variant-annotation |
+| Corpas 30x CNV calls (WGS) | `corpas-30x/subsets/cnv_calls.vcf.gz` | variant-annotation |
+| Corpas 30x PGx loci (WGS) | `corpas-30x/subsets/pgx_loci.vcf.gz` | pharmgx-reporter |
+| Corpas 30x NutriGx loci (WGS) | `corpas-30x/subsets/nutrigx_loci.vcf.gz` | nutrigx_advisor |
+| Corpas 30x QC baselines | `corpas-30x/baselines/qc_summary.json` | Benchmark tests |
+
 
 ### Demo Commands
 
@@ -181,6 +261,10 @@ python skills/gwas-prs/gwas_prs.py --demo --output /tmp/prs_demo
 # GWAS Lookup demo
 python skills/gwas-lookup/gwas_lookup.py --demo --output /tmp/gwas_lookup_demo
 
+# Methylation clock demo
+python skills/methylation-clock/methylation_clock.py \
+  --input skills/methylation-clock/data/GSE139307_small.csv.gz --output /tmp/methylation_clock_demo
+
 # Profile report demo
 python skills/profile-report/profile_report.py --demo --output /tmp/profile_demo
 
@@ -198,7 +282,43 @@ python skills/bio-orchestrator/orchestrator.py --list-skills
 
 # RNA-seq DE demo
 python skills/rnaseq-de/rnaseq_de.py --demo --output /tmp/rnaseq_de_demo
+
+# Protocols.io demo
+python skills/protocols-io/protocols_io.py --demo
+
+# Protocols.io search
+python skills/protocols-io/protocols_io.py --search "RNA extraction"
+
+# Soul2DNA demo
+python skills/soul2dna/soul2dna.py --demo
+
+# GenomeMatch demo
+python skills/genome-match/genome_match.py --demo
+
+# Recombinator demo
+python skills/recombinator/recombinator.py --demo
+
+# Labstep demo
+python skills/labstep/labstep.py --demo --output /tmp/labstep
+
+# SuSiE fine-mapping demo
+python skills/fine-mapping/fine_mapping.py --demo --output /tmp/finemapping_demo
+
+# CellposeSAM demo
+python skills/cell-detection/cell_detection.py --demo --output /tmp/cell_detection_demo
+
 ```
+
+## Development Rules (STRICT)
+
+**All skill development and modification MUST use red/green TDD:**
+1. Write tests first that define the expected behaviour
+2. Run the tests and watch them fail (red)
+3. Implement the code to make the tests pass (green)
+4. Run the tests again and confirm they pass
+5. Refactor if needed, re-run tests to confirm no regression
+
+This applies to: new skills, bug fixes, feature additions, refactors, and any code change touching skill logic. No PR or commit should ship code that was not validated by this cycle. Agents: when asked to build or modify a skill, always start by writing or updating the test suite before touching implementation code.
 
 ## Contributing — New Skill Workflow
 
@@ -206,9 +326,11 @@ When a user wants to create a new skill:
 
 1. Copy the template: `cp templates/SKILL-TEMPLATE.md skills/<new-skill-name>/SKILL.md`
 2. Edit the SKILL.md: fill in YAML frontmatter + methodology sections
-3. Add Python implementation (optional for MVP — SKILL.md alone is usable)
-4. Add demo data and tests
-5. Read `CONTRIBUTING.md` for naming conventions, code standards, and wanted skills list
+3. **Write tests first (red/green TDD):** create `skills/<name>/tests/test_<name>.py` with tests for expected inputs, outputs, edge cases, and demo mode. Run them and confirm they fail.
+4. Add Python implementation to make the tests pass
+5. Add demo data and `--demo` flag support
+6. Run full test suite: `pytest skills/<name>/tests/`
+7. Read `CONTRIBUTING.md` for naming conventions, code standards, and wanted skills list
 
 ## Safety Rules
 

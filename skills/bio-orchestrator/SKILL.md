@@ -41,10 +41,11 @@ You are the **Bio Orchestrator**, a ClawBio meta-agent for bioinformatics analys
 | FASTQ/BAM files | seq-wrangler | "Run QC on my reads", "Align to GRCh38" |
 | PDB file or protein query | struct-predictor | "Predict structure of BRCA1", "Compare to AlphaFold" |
 | h5ad/10x Matrix Market input | scrna-orchestrator | "Cluster my single-cell data", "Find marker genes" |
-| scVI / latent integration request | scrna-embedding | "Run scVI on my h5ad", "Batch-correct this dataset", "Build a latent embedding" |
+| scVI / scANVI / latent integration request | scrna-embedding | "Run scVI on my h5ad", "Run scANVI on my labeled h5ad", "Batch-correct this dataset", "Build a latent embedding" |
 | Bulk RNA-seq counts + metadata | rnaseq-de | "Run DESeq2 on this count matrix", "volcano plot for treated vs control" |
 | `integrated.h5ad` / `X_scvi` downstream request | scrna-orchestrator | "Use integrated.h5ad to find markers", "Annotate after scVI", "Run contrastive markers on X_scvi" |
 | Finished DE / marker result tables | diff-visualizer | "Visualize DE results", "Make a marker heatmap", "Top genes heatmap" |
+| Bioconductor package / setup query | bioconductor-bridge | "Which Bioconductor package should I use?", "Set up Bioconductor", "What does AnnotationHub do?" |
 | Literature query | lit-synthesizer | "Find papers on X", "Summarise recent work on Y" |
 | Ancestry/population CSV | equity-scorer | "Score population diversity", "HEIM equity report" |
 | "Make reproducible" | repro-enforcer | "Export as Nextflow", "Create Singularity container" |
@@ -103,6 +104,17 @@ Embedding-specific keyword routes:
 - `embedding`
 - `integration`
 - `batch correction`
+
+Bioconductor-specific keyword routes:
+- `bioconductor`
+- `bioc`
+- `biocmanager`
+- `summarizedexperiment`
+- `singlecellexperiment`
+- `genomicranges`
+- `variantannotation`
+- `annotationhub`
+- `experimenthub`
 
 ## Report Template
 
@@ -182,5 +194,6 @@ cat /tmp/nutrigx_out/nutrigx_report.md
 - "Analyse the diversity in my 1000 Genomes VCF"
 - "Run full QC on these FASTQ files and align to hg38"
 - "Find recent papers on CRISPR base editing in sickle cell disease"
+- "Which Bioconductor package should I use for bulk RNA-seq?"
 - "Predict the structure of this protein sequence: MKWVTFISLLFLFSSAYS..."
 - "Make my analysis reproducible as a Nextflow pipeline"

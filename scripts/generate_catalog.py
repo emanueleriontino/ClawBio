@@ -39,19 +39,56 @@ def parse_yaml_frontmatter(text: str) -> dict:
     raw = match.group(1)
     result: dict = {}
     current_key = None
-    for line in raw.split("\n"):
+    lines = raw.split("\n")
+    idx = 0
+
+    def _fold_block(block_lines: list[str], style: str) -> str:
+        cleaned = [line[2:] if line.startswith("  ") else line for line in block_lines]
+        if style.startswith("|"):
+            return "\n".join(cleaned).strip()
+        paragraphs: list[str] = []
+        current: list[str] = []
+        for line in cleaned:
+            stripped = line.strip()
+            if not stripped:
+                if current:
+                    paragraphs.append(" ".join(current))
+                    current = []
+                continue
+            current.append(stripped)
+        if current:
+            paragraphs.append(" ".join(current))
+        return "\n\n".join(paragraphs).strip()
+
+    while idx < len(lines):
+        line = lines[idx]
         # Top-level key: value
         m = re.match(r"^(\w[\w-]*):\s*(.*)", line)
         if m:
             key, val = m.group(1), m.group(2).strip()
             if val.startswith("[") and val.endswith("]"):
                 result[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
-            elif val == "" or val == "|":
+                current_key = None
+            elif val in {"|", "|-", ">", ">-"}:
+                idx += 1
+                block_lines: list[str] = []
+                while idx < len(lines):
+                    next_line = lines[idx]
+                    if next_line.startswith("  ") or next_line == "":
+                        block_lines.append(next_line)
+                        idx += 1
+                        continue
+                    break
+                result[key] = _fold_block(block_lines, val)
+                current_key = None
+                continue
+            elif val == "":
                 result[key] = ""
                 current_key = key
             else:
                 result[key] = val.strip("'\"")
                 current_key = key
+            idx += 1
             continue
         # List item under current key
         m2 = re.match(r"^\s+-\s+(.*)", line)
@@ -59,6 +96,7 @@ def parse_yaml_frontmatter(text: str) -> dict:
             if not isinstance(result.get(current_key), list):
                 result[current_key] = []
             result[current_key].append(m2.group(1).strip().strip("'\""))
+        idx += 1
     return result
 
 
@@ -96,22 +134,28 @@ FOLDER_TO_ALIAS = {
     "gwas-prs": "prs",
     "clinpgx": "clinpgx",
     "gwas-lookup": "gwas",
+    "bigquery-public": "bigquery",
     "profile-report": "profile",
     "galaxy-bridge": "galaxy",
+    "bioconductor-bridge": "bioc",
     "rnaseq-de": "rnaseq",
     "diff-visualizer": "diffviz",
+    "llm-biobank-bench": "llm-bench",
 }
 
 # Skill folders excluded from the public catalog (local-only / gitignored)
-EXCLUDED_FOLDERS = {"pr-audit"}
+EXCLUDED_FOLDERS = {"pr-audit", "wes-clinical-report-es"}
 
 # Skills that are MVP (have working Python + are in SKILLS dict or are bio-orchestrator)
 MVP_FOLDERS = {
     "pharmgx-reporter", "equity-scorer", "nutrigx_advisor", "claw-metagenomics",
     "scrna-orchestrator", "scrna-embedding",
     "genome-compare", "drug-photo", "gwas-prs", "clinpgx", "gwas-lookup",
+    "bigquery-public",
     "profile-report", "bio-orchestrator", "claw-ancestry-pca", "claw-semantic-sim",
     "ukb-navigator", "galaxy-bridge", "rnaseq-de", "diff-visualizer",
+    "bioconductor-bridge",
+    "llm-biobank-bench",
 }
 
 # Known trigger keywords for orchestrator routing
@@ -120,13 +164,14 @@ TRIGGER_KEYWORDS: dict[str, list[str]] = {
     "drug-photo": ["drug photo", "medication photo", "pill photo", "drug image"],
     "clinpgx": ["ClinPGx", "gene-drug", "PharmGKB", "CPIC guideline database", "FDA drug label"],
     "gwas-lookup": ["GWAS", "variant lookup", "rsID", "PheWAS", "eQTL"],
+    "bigquery-public": ["bigquery", "public dataset", "sql", "public data", "cloud query"],
     "gwas-prs": ["polygenic risk", "PRS", "PGS Catalog", "risk score"],
     "profile-report": ["profile report", "unified report", "my profile", "genomic profile"],
     "genome-compare": ["genome comparison", "IBS", "George Church", "Corpasome", "pairwise"],
     "equity-scorer": ["HEIM", "equity", "FST", "heterozygosity", "population representation"],
     "nutrigx_advisor": ["nutrition", "nutrigenomics", "diet genetics", "MTHFR", "caffeine", "lactose"],
     "scrna-orchestrator": ["single-cell", "scrna", "h5ad", "mtx", "10x", "scanpy", "umap", "leiden"],
-    "scrna-embedding": ["scvi", "latent", "embedding", "integration", "batch correction", "10x"],
+    "scrna-embedding": ["scvi", "scanvi", "latent", "embedding", "integration", "batch correction", "10x"],
     "rnaseq-de": ["differential expression", "bulk rna", "rna-seq", "count matrix", "deseq2", "pydeseq2"],
     "diff-visualizer": ["visualize de results", "de visualization", "marker heatmap", "marker dotplot", "top genes heatmap"],
     "claw-ancestry-pca": ["ancestry", "PCA", "admixture", "SGDP", "population structure"],
@@ -134,7 +179,9 @@ TRIGGER_KEYWORDS: dict[str, list[str]] = {
     "claw-metagenomics": ["metagenomics", "Kraken2", "RGI", "CARD", "HUMAnN3", "microbiome"],
     "bio-orchestrator": ["route", "which skill", "orchestrator"],
     "ukb-navigator": ["UK Biobank", "UKB", "biobank schema", "data showcase"],
+    "llm-biobank-bench": ["llm benchmark", "benchmark language models", "biobank knowledge retrieval", "coverage score", "weighted coverage", "model comparison biobank"],
     "galaxy-bridge": ["galaxy", "usegalaxy", "tool shed", "bioblend", "run on galaxy", "galaxy tool", "galaxy workflow", "NGS pipeline"],
+    "bioconductor-bridge": ["bioconductor", "bioc", "biocmanager", "summarizedexperiment", "singlecellexperiment", "genomicranges", "variantannotation", "annotationhub", "experimenthub"],
 }
 
 # Known chaining partners
@@ -143,6 +190,7 @@ CHAINING: dict[str, list[str]] = {
     "drug-photo": ["pharmgx-reporter"],
     "clinpgx": ["pharmgx-reporter", "gwas-lookup"],
     "gwas-lookup": ["clinpgx", "gwas-prs", "lit-synthesizer"],
+    "bigquery-public": [],
     "gwas-prs": ["profile-report", "gwas-lookup"],
     "profile-report": ["pharmgx-reporter", "nutrigx_advisor", "gwas-prs", "genome-compare"],
     "genome-compare": ["claw-ancestry-pca", "profile-report"],
@@ -156,8 +204,10 @@ CHAINING: dict[str, list[str]] = {
     "claw-semantic-sim": ["equity-scorer"],
     "claw-metagenomics": [],
     "bio-orchestrator": [],
-    "ukb-navigator": [],
+    "ukb-navigator": ["llm-biobank-bench"],
+    "llm-biobank-bench": ["ukb-navigator", "pubmed-summariser", "lit-synthesizer"],
     "galaxy-bridge": ["pharmgx-reporter", "claw-metagenomics", "equity-scorer", "vcf-annotator"],
+    "bioconductor-bridge": ["rnaseq-de", "scrna-orchestrator", "diff-visualizer", "bio-orchestrator"],
 }
 
 
